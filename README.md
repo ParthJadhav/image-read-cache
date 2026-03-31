@@ -2,6 +2,14 @@
 
 An [Agent Skill](https://agentskills.io) that caches LLM image descriptions as XMP metadata inside image files, reducing token usage by ~92% on repeated reads.
 
+## Installation
+
+```bash
+npx skills add ParthJadhav/image-read-cache
+```
+
+Works with [30+ compatible agents](https://agentskills.io) including Claude Code, Cursor, OpenCode, Gemini CLI, Goose, Roo Code, GitHub Copilot, and more.
+
 ## The Problem
 
 Every time an AI agent reads an image, it sends the full base64-encoded image to the LLM. In a multi-turn conversation where the same image is referenced repeatedly, this compounds fast:
@@ -22,12 +30,15 @@ Agent reads image.png
 
 The cache is embedded in the image file itself -- no external database, no sidecar files (for JPEG/PNG/WebP), and it follows the image wherever it goes.
 
+For GIF and BMP, the cache is stored in an adjacent `.ai-cache` sidecar because those formats do not support the same embedded XMP flow used for JPEG/PNG/WebP.
+
 ## How It Works
 
 ```
 image-read-cache/
   SKILL.md              # Agent instructions (AgentSkills.io format)
   scripts/
+    cache_common.py     # Shared hashing/XMP/atomic-write helpers
     check_cache.py      # Read cached description from XMP metadata
     write_cache.py      # Write description into image XMP metadata
 ```
@@ -39,9 +50,17 @@ image-read-cache/
 3. If `NO_CACHE` -- read the image normally, then run `write_cache.py` to store the result
 4. Future reads of the same image return the cached text
 
+Implementation details:
+
+- `check_cache.py` reads the image file once per invocation and validates the cache from that in-memory buffer
+- `write_cache.py` hashes the original bytes before writing, so cache rewrites do not invalidate themselves
+- GIF and BMP skip embedded-XMP probing and go straight to the sidecar path
+
 ### Cache Invalidation
 
 A SHA-256 hash of the image content (excluding the cache metadata) is stored alongside the description. If the image file changes (re-export, new screenshot, pixel edits), the hash won't match and the cache auto-invalidates. No stale descriptions, ever.
+
+All cache writes are atomic. Embedded metadata rewrites and `.ai-cache` sidecar writes are written to a temporary file in the same directory and then replaced with `os.replace(...)`, which avoids partial writes if the process crashes mid-write.
 
 ## Format Support
 
@@ -55,13 +74,7 @@ A SHA-256 hash of the image content (excluding the cache metadata) is stored alo
 
 When `exiftool` is available, it's used for all formats. Otherwise, direct byte injection handles JPEG/PNG/WebP natively with zero external dependencies beyond Python 3.9+.
 
-## Installation
-
-```bash
-npx skills add ParthJadhav/image-read-cache
-```
-
-Works with [30+ compatible agents](https://agentskills.io) including Claude Code, Cursor, OpenCode, Gemini CLI, Goose, Roo Code, GitHub Copilot, and more.
+When invoking `exiftool`, the scripts terminate option parsing with `--` before the target path, which prevents dash-prefixed filenames from being interpreted as flags.
 
 ## Benchmark Results
 
