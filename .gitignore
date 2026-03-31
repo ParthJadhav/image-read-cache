@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*.ai-cache
+.DS_Store
+*.tmp.xmp
